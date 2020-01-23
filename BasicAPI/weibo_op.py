@@ -270,6 +270,8 @@ class WeiboOp:
         payload = {
             "cb": "https://weibo.com /aj/static/upimgback.html?_wv=5&callback=STK_ijax_151694642763479",
             "mime": "image/jpeg",
+            # "p": "1",
+            # "data": "1",
             "data": "base64",
             "url": "weibo.com/u/%s" % self.uid,
             "markpos": "1",
@@ -277,7 +279,8 @@ class WeiboOp:
             # "nick": "@王雨城_Vision_Wong",
             "marks": "1",
             "app": "miniblog",
-            "s": "rdxt",
+            "s": "json",
+            "pri": "0",
             "file_source": "3",
         }
 
@@ -285,7 +288,15 @@ class WeiboOp:
             "b64_data": img_bs64_str,
         }
         try:
-            res = self.session.post(url, data=payload, files=img)
+            headers = {
+                # "Content-Type": "multipart/form-data", # 加了这条就看不到pid
+                "Host": "picupload.weibo.com", # 没加这条报403
+            }
+            # self.session.headers.update(headers)
+            res = self.session.post(url, headers=headers, data=payload, files=img)
+            json_text = re.search("(\{.*\})", res.text).group(1)
+            res_json = json.loads(json_text)
+            return res_json["data"]["pics"]["pic_1"]["pid"]
         except Exception as e:
             return re.search("&pid=([\S]*)", str(e)).group(1)# 从异常信息中可以得到返回的pid
 

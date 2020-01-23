@@ -10,11 +10,12 @@ from lxml import html
 import threading
 from log import Logger
 import settings
+import traceback
 
 class WeiboServices:
 
     def __init__(self):
-        self.log = Logger('wbservices.log', logging.DEBUG, logging.DEBUG)
+        self.log = Logger('../Sources/logs/wbservices.log', logging.DEBUG, logging.DEBUG)
 
     def ask_tuling(self, info, uid):
         url = "http://www.tuling123.com/openapi/api"
@@ -102,9 +103,15 @@ class WeiboServices:
             time.sleep(sleep_time)
             print("间隔 %d" % sleep_time)
 
-    # 监听单个用户，抢沙发
-    # listener是一个dict {"uid": ,"session": , }
-    def listen_user(self, listener, uid_listened, sofa=True, mid_last=None):
+    def listen_user(self, listener, uid_listened, reply_text=None, reply_icon=None, mid_last=None):
+        '''
+        # 监听单个用户，抢沙发
+        :param listener: 一个dict {"uid": ,"session": , }
+        :param uid_listened: 监听的用户id
+        :param sofa:
+        :param mid_last:
+        :return:
+        '''
         url = "https://m.weibo.cn/api/container/getIndex?type=uid&value=%s&containerid=107603%s&page=1" % (uid_listened, uid_listened)
         headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
@@ -120,7 +127,6 @@ class WeiboServices:
                 res = requests.get(url, headers)
                 cards = json.loads(res.text)["data"]["cards"]
 
-
                 card_last = cards[0]
                 blog = card_last["mblog"]
                 print("持续监听 %s" % blog["user"]["screen_name"])
@@ -129,10 +135,7 @@ class WeiboServices:
                     mid_last = blog["mid"]
 
                 if int(blog["mid"]) > int(mid_last):
-                    reply_text = u"我是沙发的守护者，橘子的代言人。"
-                    reply_icon = None
-
-                    if not sofa:# 不是抢沙发，就用机器人智能回复
+                    if reply_text is None:# 不是抢沙发，就用机器人智能回复
                         # 过滤html标签
                         t = html.fromstring(blog["text"])
                         blog_text = t.xpath('string(.)')
@@ -144,7 +147,7 @@ class WeiboServices:
                     print("%s 更新了: %s" % (blog["user"]["screen_name"], blog["text"]))
 
                     wbop = WeiboOp(listener["uid"], session=listener["session"])
-                    comment_res = wbop.comment_forward(blog["mid"], reply_text, "0", reply_icon)
+                    comment_res = wbop.comment_forward(blog["mid"], reply_text, False, reply_icon)
 
                     if comment_res["code"] == "100000":
                         mid_last = blog["mid"]
@@ -157,28 +160,34 @@ class WeiboServices:
 
                 random.seed(time.time())
                 sleep_time = 1 + random.random() * 5
-                print("睡眠间隔 %d" % sleep_time)
+                # print("睡眠间隔 %d" % sleep_time)
 
                 time.sleep(sleep_time)
             except Exception as e:
+                traceback.print_exc()
                 self.log.error(str(e))
                 time.sleep(10)
                 continue
 
     # 监听多个微博用户，抢沙发
-    def listen_users(self, listener, uid_list, sofa=True):
+    def listen_users(self, listener, uid_2_reply_text, uid_2_reply_icon):
+        '''
+        :param listener: 登录的user对象
+        :param uid_2_reply_text: {uid: reply_text}
+        :return:
+        '''
         t_map = {}
-        for uid in uid_list:
-            t = threading.Thread(target=self.listen_user, args=(listener, uid, sofa), name=uid)
+        for uid, reply_text in uid_2_reply_text.items():
+            t = threading.Thread(target=self.listen_user, args=(listener, uid, reply_text, uid_2_reply_icon[uid]), name=uid)
             t.start()
             t_map[uid] = t
 
         while True: # 主线程死循环阻塞，负责监控其他线程
             print("当前活跃线程数目： %d" % threading.active_count())
-            if threading.active_count() - 1 < len(uid_list): # 发现某个线程被杀死了，进行检查并再次实例化对应uid的线程，-1是减掉主线程
+            if threading.active_count() - 1 < len(uid_2_reply_text.items()): # 发现某个线程被杀死了，进行检查并再次实例化对应uid的线程，-1是减掉主线程
                 for uid, thread in t_map.items():
                     if thread is None:
-                        t = threading.Thread(target=self.listen_user, args=(listener, uid, sofa), name=uid)
+                        t = threading.Thread(target=self.listen_user, args=(listener, uid, uid_2_reply_text[uid], uid_2_reply_icon[uid]), name=uid)
                         t.start()
                         t_map[uid] = t
             time.sleep(3)
@@ -319,9 +328,27 @@ if __name__ == "__main__":
     ws = WeiboServices()
 
     wblg = WeiboLoginSimulation()
-    user = wblg.login_simulate("15850782585", "Weibo6981228")
-    wbop = WeiboOp(user["uid"], user["session"])
-    wbop.reply_comment("4221398014488145", "4221453844425270", "...",)
+    user = wblg.login_simulate("15850782585", "Weibo6981228,,,") # 模拟登录
+    # wbop = WeiboOp(user["uid"], user["session"])
+    # wbop.comment_forward("4463822079498814", "自测发图hhhh", forward=False, img_url="../Sources/img/door.png")
+
+    # 成果：1927305954
+    # 犬来八荒: 7347878145
+    # 自己：6219737121
+    uid_2_reply_text = {
+        "1927305954": "狗哥的沙发我承包了，弟弟们还有什么想说的？",
+        "7347878145": "狗哥的沙发我承包了，弟弟们还有什么想说的？",
+        "6219737121": "狗哥的沙发我承包了，弟弟们还有什么想说的？",
+    }
+    uid_2_reply_icon = {
+        "1927305954": "../Sources/img/jiuzheyang.jpg",
+        "7347878145": "../Sources/img/jiuzheyang.jpg",
+        "6219737121": "../Sources/img/jiuzheyang.jpg",
+    }
+    # ws.listen_user(user, "6219737121", "沙发", "../Sources/img/jiuzheyang.jpg")
+    ws.listen_users(user, uid_2_reply_text, uid_2_reply_icon)
+
+    # wbop.reply_comment("4463794787037289", "4221453844425270", "...",)
     # ws.batch_delete(user, "4123769540944819")
 
     # comments = [
